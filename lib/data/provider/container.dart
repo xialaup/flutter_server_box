@@ -4,13 +4,13 @@ import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter/material.dart';
-import 'package:toolbox/core/extension/ssh_client.dart';
-import 'package:toolbox/data/model/app/shell_func.dart';
-import 'package:toolbox/data/model/container/image.dart';
-import 'package:toolbox/data/model/container/ps.dart';
-import 'package:toolbox/data/model/app/error.dart';
-import 'package:toolbox/data/model/container/type.dart';
-import 'package:toolbox/data/res/store.dart';
+import 'package:server_box/core/extension/ssh_client.dart';
+import 'package:server_box/data/model/app/shell_func.dart';
+import 'package:server_box/data/model/container/image.dart';
+import 'package:server_box/data/model/container/ps.dart';
+import 'package:server_box/data/model/app/error.dart';
+import 'package:server_box/data/model/container/type.dart';
+import 'package:server_box/data/res/store.dart';
 
 final _dockerNotFound =
     RegExp(r"command not found|Unknown command|Command '\w+' not found");
@@ -160,11 +160,18 @@ class ContainerProvider extends ChangeNotifier {
     }
 
     // Parse images
-    final imageRaw = ContainerCmdType.images.find(segments);
+    final imageRaw = ContainerCmdType.images.find(segments).trim();
+    final isEntireJson = imageRaw.startsWith('[') && imageRaw.endsWith(']');
     try {
-      final imgLines = imageRaw.split('\n');
-      imgLines.removeWhere((element) => element.isEmpty);
-      images = imgLines.map((e) => ContainerImg.fromRawJson(e, type)).toList();
+      if (isEntireJson) {
+        images = (json.decode(imageRaw) as List)
+            .map((e) => ContainerImg.fromRawJson(json.encode(e), type))
+            .toList();
+      } else {
+        final lines = imageRaw.split('\n');
+        lines.removeWhere((element) => element.isEmpty);
+        images = lines.map((e) => ContainerImg.fromRawJson(e, type)).toList();
+      }
     } catch (e, trace) {
       error = ContainerErr(
         type: ContainerErrType.parseImages,
@@ -276,9 +283,13 @@ enum ContainerCmdType {
     return switch (this) {
       ContainerCmdType.version => '$prefix version $_jsonFmt',
       ContainerCmdType.ps => switch (type) {
+          /// TODO: Rollback to json format when permformance recovers.
           /// Use [_jsonFmt] in Docker will cause the operation to slow down.
-          ContainerType.docker => '$prefix ps -a --format "table '
-              '{{printf \\"${"%-30.30s " * 4}\\" .ID .Names .Image .Status}}"',
+          ContainerType.docker => '$prefix ps -a --format "table {{printf \\"'
+              '%-15.15s '
+              '%-30.30s '
+              '${"%-50.50s " * 2}\\"'
+              ' .ID .Status .Names .Image}}"',
           ContainerType.podman => '$prefix ps -a $_jsonFmt',
         },
       ContainerCmdType.stats =>
@@ -294,6 +305,6 @@ enum ContainerCmdType {
   }) {
     return ContainerCmdType.values
         .map((e) => e.exec(type, sudo: sudo, includeStats: includeStats))
-        .join(' && echo ${ShellFunc.seperator} && ');
+        .join('\necho ${ShellFunc.seperator}\n');
   }
 }

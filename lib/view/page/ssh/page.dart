@@ -7,13 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:provider/provider.dart';
-import 'package:toolbox/core/extension/context/locale.dart';
-import 'package:toolbox/core/utils/ssh_auth.dart';
-import 'package:toolbox/core/utils/server.dart';
-import 'package:toolbox/data/model/server/snippet.dart';
-import 'package:toolbox/data/provider/virtual_keyboard.dart';
-import 'package:toolbox/data/res/provider.dart';
-import 'package:toolbox/data/res/store.dart';
+import 'package:server_box/core/extension/context/locale.dart';
+import 'package:server_box/core/utils/ssh_auth.dart';
+import 'package:server_box/core/utils/server.dart';
+import 'package:server_box/data/model/server/snippet.dart';
+import 'package:server_box/data/provider/virtual_keyboard.dart';
+import 'package:server_box/data/res/provider.dart';
+import 'package:server_box/data/res/store.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:xterm/core.dart';
 import 'package:xterm/ui.dart' hide TerminalThemes;
@@ -28,6 +28,7 @@ const _echoPWD = 'echo \$PWD';
 class SSHPage extends StatefulWidget {
   final ServerPrivateInfo spi;
   final String? initCmd;
+  final Snippet? initSnippet;
   final bool notFromTab;
   final Function()? onSessionEnd;
   final GlobalKey<TerminalViewState>? terminalKey;
@@ -36,18 +37,22 @@ class SSHPage extends StatefulWidget {
     super.key,
     required this.spi,
     this.initCmd,
+    this.initSnippet,
     this.notFromTab = true,
     this.onSessionEnd,
     this.terminalKey,
   });
 
+  static final focusNode = FocusNode();
+
   @override
-  State<SSHPage> createState() => _SSHPageState();
+  State<SSHPage> createState() => SSHPageState();
 }
 
 const _horizonPadding = 7.0;
 
-class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
+class SSHPageState extends State<SSHPage>
+    with AutomaticKeepAliveClientMixin, AfterLayoutMixin {
   final _keyboard = VirtKeyProvider();
   late final _terminal = Terminal(inputHandler: _keyboard);
   final TerminalController _terminalController = TerminalController();
@@ -71,13 +76,6 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
     super.initState();
     _initStoredCfg();
     _initVirtKeys();
-
-    Future.delayed(const Duration(milliseconds: 77), () async {
-      _showHelp();
-      await _initTerminal();
-
-      if (Stores.setting.sshWakeLock.fetch()) WakelockPlus.enable();
-    });
   }
 
   @override
@@ -151,7 +149,7 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
           textStyle: _terminalStyle,
           theme: _terminalTheme,
           deleteDetection: isMobile,
-          autofocus: true,
+          autofocus: false,
           keyboardAppearance: _isDark ? Brightness.dark : Brightness.light,
           showToolbar: isMobile,
           viewOffset: Offset(
@@ -159,6 +157,7 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
             CustomAppBar.barHeight ?? _media.padding.top,
           ),
           hideScrollBar: false,
+          focusNode: SSHPage.focusNode,
         ),
       ),
     );
@@ -311,8 +310,7 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
 
         final snippet = snippets.firstOrNull;
         if (snippet == null) return;
-        _terminal.textInput(snippet.script);
-        _terminal.keyInput(TerminalKey.enter);
+        snippet.runInTerm(_terminal, widget.spi);
         break;
       case VirtualKeyFunc.file:
         // get $PWD from SSH session
@@ -417,17 +415,22 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
 
     _initService();
 
+    for (final snippet in Pros.snippet.snippets) {
+      if (snippet.autoRunOn?.contains(widget.spi.id) == true) {
+        snippet.runInTerm(_terminal, widget.spi);
+      }
+    }
+
     if (widget.initCmd != null) {
       _terminal.textInput(widget.initCmd!);
       _terminal.keyInput(TerminalKey.enter);
-    } else {
-      for (final snippet in Pros.snippet.snippets) {
-        if (snippet.autoRunOn?.contains(widget.spi.id) == true) {
-          _terminal.textInput(snippet.script);
-          _terminal.keyInput(TerminalKey.enter);
-        }
-      }
     }
+
+    if (widget.initSnippet != null) {
+      widget.initSnippet!.runInTerm(_terminal, widget.spi);
+    }
+
+    SSHPage.focusNode.requestFocus();
 
     await session.done;
     if (mounted && widget.notFromTab) {
@@ -516,21 +519,29 @@ class _SSHPageState extends State<SSHPage> with AutomaticKeepAliveClientMixin {
   }
 
   Future<void> _showHelp() async {
-    if (!Stores.setting.sshTermHelpShown.fetch()) {
-      await context.showRoundDialog(
-        title: l10n.doc,
-        child: Text(l10n.sshTermHelp),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Stores.setting.sshTermHelpShown.put(true);
-              context.pop();
-            },
-            child: Text(l10n.noPromptAgain),
-          ),
-        ],
-      );
-    }
+    if (Stores.setting.sshTermHelpShown.fetch()) return;
+
+    return await context.showRoundDialog(
+      title: l10n.doc,
+      child: Text(l10n.sshTermHelp),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Stores.setting.sshTermHelpShown.put(true);
+            context.pop();
+          },
+          child: Text(l10n.noPromptAgain),
+        ),
+      ],
+    );
+  }
+
+  @override
+  FutureOr<void> afterFirstLayout(BuildContext context) async {
+    await _showHelp();
+    await _initTerminal();
+
+    if (Stores.setting.sshWakeLock.fetch()) WakelockPlus.enable();
   }
 }
 

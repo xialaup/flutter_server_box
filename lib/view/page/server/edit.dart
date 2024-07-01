@@ -4,11 +4,13 @@ import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter/material.dart';
 import 'package:icons_plus/icons_plus.dart';
 import 'package:provider/provider.dart';
-import 'package:toolbox/core/extension/context/locale.dart';
-import 'package:toolbox/data/model/app/shell_func.dart';
-import 'package:toolbox/data/model/server/custom.dart';
-import 'package:toolbox/data/model/server/wol_cfg.dart';
-import 'package:toolbox/data/res/provider.dart';
+import 'package:server_box/core/extension/context/locale.dart';
+import 'package:server_box/data/model/app/shell_func.dart';
+import 'package:server_box/data/model/server/custom.dart';
+import 'package:server_box/data/model/server/wol_cfg.dart';
+import 'package:server_box/data/res/provider.dart';
+import 'package:server_box/data/res/store.dart';
+import 'package:server_box/data/res/url.dart';
 
 import '../../../core/route.dart';
 import '../../../data/model/server/server_private_info.dart';
@@ -421,7 +423,7 @@ class _ServerEditPageState extends State<ServerEditPage> {
           type: TextInputType.url,
           icon: MingCute.web_line,
           node: node,
-          label: l10n.addr,
+          label: 'URL',
           hint: addr,
         ),
       ),
@@ -484,7 +486,7 @@ class _ServerEditPageState extends State<ServerEditPage> {
       Input(
         controller: _wolMacCtrl,
         type: TextInputType.text,
-        label: 'Mac ${l10n.addr}',
+        label: 'MAC ${l10n.addr}',
         icon: Icons.computer,
         hint: '00:11:22:33:44:55',
       ),
@@ -646,6 +648,17 @@ class _ServerEditPageState extends State<ServerEditPage> {
       custom: custom,
       wolCfg: wol,
     );
+
+    final tipShown = Stores.history.writeScriptTipShown;
+    if (!tipShown.fetch()) {
+      final ok = await context.showRoundDialog(
+        title: l10n.attention,
+        child: SimpleMarkdown(data: l10n.beforeConnect(Urls.thisRepo)),
+        actions: Btns.oks(onTap: () => context.pop(true)),
+      );
+      if (ok != true) return;
+      tipShown.put(true);
+    }
 
     if (widget.spi == null) {
       Pros.server.addServer(spi);
